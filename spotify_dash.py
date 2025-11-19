@@ -1,18 +1,15 @@
-from logging import PlaceHolder
-from sqlite3.dbapi2 import connect
-from _plotly_utils.importers import relative_import
-import numpy as np
-import matplotlib.pyplot as plt
+# from logging import PlaceHolder
+# from sqlite3.dbapi2 import connect
+# from _plotly_utils.importers import relative_import
+# import matplotlib.pyplot as plt
 import pandas as pd
 import sqlite3
-import requests
 import datetime
 import plotly.express as px
-from requests.sessions import default_headers
-from spotipy import cache_handler
+# from requests.sessions import default_headers
+# from spotipy import cache_handler
 import sqlalchemy
-from dataclasses import dataclass
-import os
+# from dataclasses import dataclass
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 import spotipy.util as util
@@ -20,8 +17,9 @@ import time
 from statistics import multimode
 from pytz import utc, timezone
 import streamlit as st
-from streamlit.type_util import is_namedtuple
-from dateutil.relativedelta import relativedelta
+from environ import SPOTIFY_USER_ID
+# from streamlit.type_util import is_namedtuple
+# from dateutil.relativedelta import relativedelta
 #import bar_chart_race as bcr
 
 #----------------------------------------- TO ADD ------------------------------------------------------#
@@ -36,6 +34,15 @@ from dateutil.relativedelta import relativedelta
 #----------------------------------------- TAB LAYOUT ------------------------------------------------------#
 st.set_page_config(page_title='SpotifyInReview', page_icon='🎧',
 layout="wide", initial_sidebar_state="auto")
+
+if SPOTIFY_USER_ID is None:
+    st.warning("Missing user id! Please add your 11 digit spotify user id to the .env file")
+else:
+    if len(SPOTIFY_USER_ID) == 11:
+        USER_ID = SPOTIFY_USER_ID
+    else:
+        st.warning("Unexpected user id format! Must be an 11 digit numerical user id")
+
 #------------------------------------------------------------------------------------------------------------------#
 
 # IF YOU WANT HISTORICAL DATA PREDATING THE BEGINNING OF YOUR USE OF THIS APP WHICH IS CREATED AND APPENDED
@@ -45,7 +52,7 @@ layout="wide", initial_sidebar_state="auto")
 #code from https://discuss.streamlit.io/t/how-do-i-use-a-background-image-on-streamlit/5067/6
 import base64
 
-@st.cache(allow_output_mutation=True)
+@st.cache_resource()
 def get_base64_of_bin_file(bin_file):
     with open(bin_file, 'rb') as f:
         data = f.read()
@@ -75,7 +82,6 @@ def set_png_as_page_bg(png_file):
 #----------------------------------- LOAD IN DATA FROM SPOTIPY API ------------------------------------------------#
 def connect_to_api(userid):
     # set constant needed to access api
-    #USER_ID = '12150191372'
     TOKEN = util.prompt_for_user_token(USER_ID,'user-read-recently-played')
 
     # create client connection to api/ store in .bash_profile, get from spotify developers page
@@ -89,7 +95,7 @@ def connect_to_api(userid):
     
     # get json data from api
     played_past_24_hrs = sp.current_user_recently_played(limit=50, after=yesterday_unix_timestamp, before=None)
-    return(played_past_24_hrs)
+    return played_past_24_hrs
 
 
 def create_song_df(json_file):
@@ -106,14 +112,14 @@ def create_song_df(json_file):
         timestamps.append(song['played_at'][0:10])
         
     song_dict={
-            "song_name" : song_names,
-            "artist_name" : artist_names,
-            "played_at" : played_at_times,
-            "timestamp" : timestamps
-            }
+        "song_name" : song_names,
+        "artist_name" : artist_names,
+        "played_at" : played_at_times,
+        "timestamp" : timestamps
+    }
     
     song_df = pd.DataFrame(song_dict, columns=['song_name','artist_name','played_at','timestamp'])
-    return(song_df)
+    return song_df
 
 def check_if_data_valid(df: pd.DataFrame) -> bool:
     # check if data frame is empty
@@ -229,9 +235,8 @@ def find_mode(df:pd.DataFrame, col:int):
         modes_str = ", ".join(multimode(modes))
         st.metric(label=f"{df.iloc[:,col].name.split('_', 1)[0].capitalize()}s of the day",value=modes_str)
 #------------------------------------------ PAGE  LAYOUT ----------------------------------------------------------#
-USER_ID = st.sidebar.text_input('11 digit USER ID here','12150191372',max_chars=11)
-#st.write(USER_ID)
-option = st.sidebar.selectbox('Choose a page',('Dailies','Monthlies','Year wrapped'))
+# option = st.sidebar.selectbox('Choose a page',('Dailies','Monthlies','Year wrapped'))
+day_tab, month_tab, year_tab = st.tabs(['Dailies','Monthlies','Year wrapped'])
 
 DATABASE_LOC = "sqlite:///my_played_tracks"
 sql_query = '''SELECT DISTINCT(played_at), song_name, artist_name 
@@ -254,22 +259,23 @@ if __name__ == "__main__":
         # connect back to database to extract as df
         df = connect_back(sql_query)
 
-if option == 'Dailies':
+with day_tab:
+# if option == 'Dailies':
     today = datetime.date.today() 
     #tmw = datetime.date.today() + datetime.timedelta(days=1)
-    d = st.date_input("Choose a date", today )
-    #st.write(d)
-    st.title("My Spotify stats for {}".format(d.strftime("%B %d, %Y")))#format(TODAY.strftime("%B %d, %Y")))
+    date_chosen = st.date_input("Choose a date", today)
+    # st.write(date_chosen)
+    st.title("My Spotify stats for {}".format(date_chosen.strftime("%B %d, %Y")))#format(TODAY.strftime("%B %d, %Y")))
     title_alignment= """<style>#the-title {text-align: center}</style>"""
     st.markdown(title_alignment, unsafe_allow_html=True)
     
     pie, hist = st.columns(2)
     #----------------------- DF MANIPULATION. REFORMATTING TIME COMPONENTS -----------------------------------#
-    df['played_at'] = pd.to_datetime(df.played_at)
+    df['played_at'] = pd.to_datetime(df.played_at, format='ISO8601', utc=True)
     df['played_at'] = [utc2local(df.played_at[x]) for x in range(len(df.played_at))] #convert UTC to local #[df.played_at[x].astimezone(timezone('America/Chicago')) for x in range(len(df.played_at))]#
     df['date'] = df['played_at'].dt.date
     # creating the daily df from the full df
-    dt_input_reformatted = datetime.datetime.strptime(d.strftime("%Y-%m-%d"),"%Y-%m-%d").date()
+    dt_input_reformatted = datetime.datetime.strptime(date_chosen.strftime("%Y-%m-%d"),"%Y-%m-%d").date()
     df_daily = df[df.date == dt_input_reformatted].copy()
     #----------------------------------------------------------------------------------------------------------#
     
@@ -277,9 +283,9 @@ if option == 'Dailies':
     #if d < df.date.min():
     #    st.write('# I don\'t have any data for this day, sorry!')
     try:
-        if d < df.date.min():
+        if date_chosen < df.date.min():
             st.write('# I don\'t have any data for this day, sorry!')
-        elif (d <= datetime.date.today()) and (d >= df.date.min()):
+        elif (date_chosen <= datetime.date.today()) and (date_chosen >= df.date.min()):
             #st.write(df.date.min(),d,datetime.date.today())
             if df_daily.empty:
                 st.write('# You didn\'t listen to anything on this day...not by my count anyways!')
@@ -310,7 +316,7 @@ if option == 'Dailies':
 #-------------------- IS NOT SIZE COMPATIBLE WITH DB1 SO KEEPING BOTH FOR NOW --------------------------------------#
 spotify = spotipy.Spotify(auth_manager=SpotifyClientCredentials())
 
-#@st.cache(allow_output_mutation=True)
+#@st.cache_resource()
 def load_data_v2_from_api(userid,database_loc):
     TOKEN = util.prompt_for_user_token(userid,'user-read-recently-played')
 
@@ -406,14 +412,14 @@ def secs_2_hr_min(secs):
     hours = secs // 3600 #the floor division // rounds the result down to the nearest whole number
     minutes = secs // 60 - hours * 60
     hr_min_str = "%d hr. %02d min." % (hours, minutes)
-    return(hr_min_str)
+    return hr_min_str
 
 def monthly_subset(df:pd.DataFrame,mo:str,yr:str):
-    tmp = pd.to_datetime(df.played_at)
+    tmp = pd.to_datetime(df.played_at, format='ISO8601', utc=True)
     df['month'] = tmp.dt.date.apply(lambda x: x.strftime('%b').lower())
     df['year'] = tmp.dt.date.apply(lambda x: x.strftime('%Y'))
     df_monthly = df[(df.month == mo) & (df.year == yr)].copy()
-    return(df_monthly)
+    return df_monthly
 
 def artist_podium(df:pd.DataFrame):
     top3_df = df.groupby('artist_name').count().sort_values('played_at',ascending=False)[:3].reset_index().rename(columns={'played_at':'song_counts'}).iloc[['1','0','2']]
@@ -487,7 +493,8 @@ def month_dat(mo: str, yr:str):
         st.write("## nothing yet...")
         pass
 #------------------------------------------------------------------------------------------------------------------#
-if option == 'Monthlies':
+with month_tab:
+# if option == 'Monthlies':
     #st.write(df_v2)
     #st.write(df)
     today = datetime.datetime.now()
@@ -496,7 +503,7 @@ if option == 'Monthlies':
     st.write(f'# Your Spotify Seasonal Summaries for {year_of_interest}')
     winter,spring = st.columns(2)
     with winter:
-        st.image("./images/winter.jpg",caption='Click below for a breakdown of your Winter listens',use_column_width='auto')
+        st.image("./images/winter.jpg",caption='Click below for a breakdown of your Winter listens',use_container_width='auto')
         dec = st.expander(label='December')
         with dec:
             month_dat('dec',year_of_interest)
@@ -509,7 +516,7 @@ if option == 'Monthlies':
         winter_playlist = st.expander(label='My Winter Mixtape')
 
     with spring:
-        st.image("./images/spring.jpg",caption='Click below for a breakdown of your Spring listens',use_column_width='auto')
+        st.image("./images/spring.jpg",caption='Click below for a breakdown of your Spring listens',use_container_width='auto')
         mar = st.expander(label='March')
         with mar:
             #st.write('it march!')
@@ -525,7 +532,7 @@ if option == 'Monthlies':
 
     summer,fall = st.columns(2)
     with summer:
-        st.image("./images/summer.jpg",caption='Click below for a breakdown of your Summer listens',use_column_width='auto')
+        st.image("./images/summer.jpg",caption='Click below for a breakdown of your Summer listens',use_container_width='auto')
         jun = st.expander(label='June')
         with jun:
             month_dat('jun',year_of_interest)
@@ -538,7 +545,7 @@ if option == 'Monthlies':
         summer_playlist = st.expander(label='My Summer Mixtape')
 
     with fall:
-        st.image("./images/fall.jpg",caption='Click below for a breakdown of your Fall listens',use_column_width='auto')
+        st.image("./images/fall.jpg",caption='Click below for a breakdown of your Fall listens',use_container_width='auto')
         sep = st.expander(label='September')
         with sep:
             month_dat('sep',year_of_interest)
@@ -552,7 +559,7 @@ if option == 'Monthlies':
 
     
 #------------------------------------------------------------------------------------------------------------------#
-import altair as alt
+# import altair as alt
 # make it so use has to place their bet on an artist/song and at conclusion of race "award"/notify if correct!
 
 # df_dados = pd.DataFrame(data=data, columns=['week_title','full_name','ranking_points','rank_number'])
@@ -601,7 +608,8 @@ import altair as alt
 
 #------------------------------------------------------------------------------------------------------------------#
 # bar chart race, time machine (where did your music transport you this year? (capture genre as well as time period) ex: 'this year you were livin your best 80's rockstar life','you were living in your own musical','nothing like the present, you caught all the newest tunes and lived in the music moment')
-if option == 'Year wrapped':
+with year_tab:
+# if option == 'Year wrapped':
     today = datetime.datetime.now()
     year = today.year
     woohoo = st.expander(f'Happy end of {year}! Let\'s unwrap your spotify year of music 🎁 [click me]')
